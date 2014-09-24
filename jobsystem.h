@@ -46,11 +46,9 @@ namespace jobsystem
 
 	inline affinity_t CalculateSafeWorkerAffinity( size_t workerIndex, size_t workerCount )
 	{
-		affinity_t affinity = (affinity_t)~0;
-
-		affinity &= ~( workerCount - 1 );
-
-		affinity |= GetBit( workerIndex );
+		affinity_t affinity = (affinity_t)~0;	// Set all bits so jobs with affinities out of range can still be processed.
+		affinity &= ~( workerCount - 1 );		// Wipe bits within valid range.
+		affinity |= GetBit( workerIndex );		// Set worker-specific bit.
 
 		return affinity;
 	}
