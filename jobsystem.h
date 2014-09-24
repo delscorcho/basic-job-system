@@ -34,6 +34,8 @@ namespace jobsystem
 
 	typedef std::function<void()> JobDelegate;			/// Structure of callbacks that can be requested as jobs.
 	
+	typedef unsigned int affinity_t;
+
 	/**
 	 * Global system components.
 	 */
@@ -41,6 +43,17 @@ namespace jobsystem
 	std::mutex						s_signalLock;		/// Global mutex for worker signaling.
 	std::condition_variable			s_signalThreads;	/// Global condition var for worker signaling.
 	std::atomic<size_t>				s_activeWorkers = 0;
+
+	inline affinity_t CalculateSafeWorkerAffinity( size_t workerIndex, size_t workerCount )
+	{
+		affinity_t affinity = (affinity_t)~0;
+
+		affinity &= ~( workerCount - 1 );
+
+		affinity |= GetBit( workerIndex );
+
+		return affinity;
+	}
 
 	/**
 	 * Offers access to the state of job.
@@ -67,16 +80,20 @@ namespace jobsystem
 		std::vector<JobStatePtr>	m_dependants;		/// List of dependent jobs.
 		std::atomic<int>			m_dependencies;		/// Number of outstanding dependencies.
 
+		affinity_t					m_workerAffinity;	/// Option to limit execution to specific worker threads / cores.
+
 		size_t						m_jobId;			/// Debug/profiling ID.
 		char						m_debugChar;		/// Debug character for profiling display.
 
-		void SetActive()
+		void SetQueued()
 		{
 			m_done.store( false, std::memory_order_release );
 		}
 
 		void SetDone()
 		{
+			assert( !IsDone() );
+
 			for( JobStatePtr dependant : m_dependants )
 			{
 				dependant->m_dependencies.fetch_add( -1, std::memory_order_relaxed );
@@ -95,27 +112,56 @@ namespace jobsystem
 		JobState() : m_debugChar( 0 )
 		{
 			m_jobId = s_nextJobId++;
+			m_workerAffinity = (affinity_t)~0;
 
 			m_ready.store( false, std::memory_order_release );
+			m_done.store( false, std::memory_order_release );
 		}
 
 		~JobState() {}
 
-		void SetReady()
+		JobState& SetReady()
 		{
+			assert( !IsDone() );
+
+			m_cancel.store( false, std::memory_order_relaxed );
 			m_ready.store( true, std::memory_order_release );
 
 			s_signalThreads.notify_all();
+
+			return *this;
+		}
+
+		JobState& Cancel()
+		{
+			assert( !IsDone() );
+
+			m_cancel.store( true, std::memory_order_relaxed );
+
+			return *this;
+		}
+
+		JobState& AddDependant( JobStatePtr dependant )
+		{
+			assert( m_dependants.end() == std::find( m_dependants.begin(), m_dependants.end(), dependant ) );
+
+			m_dependants.push_back( dependant );
+
+			dependant->m_dependencies.fetch_add( 1, std::memory_order_relaxed );
+
+			return *this;
+		}
+
+		JobState& SetWorkerAffinity( affinity_t affinity )
+		{
+			m_workerAffinity = affinity ? affinity : (affinity_t)~0;
+
+			return *this;
 		}
 
 		bool IsDone() const
 		{
 			return m_done.load( std::memory_order_acquire );
-		}
-
-		void Cancel()
-		{
-			m_cancel.store( true, std::memory_order_relaxed );
 		}
 
 		void Wait( size_t maxWaitMicroseconds = 0 )
@@ -136,16 +182,8 @@ namespace jobsystem
 					{
 						break;
 					}
-
 				}
 			}
-		}
-
-		void AddDependant( JobStatePtr dependant )
-		{
-			m_dependants.push_back( dependant );
-
-			dependant->m_dependencies.fetch_add( 1, std::memory_order_relaxed );
 		}
 
 		bool AreDependenciesMet() const
@@ -162,6 +200,7 @@ namespace jobsystem
 
 			return true;
 		}
+
 	};
 
 	/**
@@ -182,13 +221,13 @@ namespace jobsystem
 	{
 		JobWorkerDescriptor()
 		:	m_name					( "JobSystemWorker" )
-		,	m_affinity				( 0xffffffff )
+		,	m_cpuAffinity			( 0xffffffff )
 		,	m_enableWorkStealing	( true )
 		{
 		}
 
 		std::string		m_name;						/// Worker name, for debug/profiling displays.
-		unsigned int	m_affinity;					/// Thread affinity. Defaults to all cores.
+		unsigned int	m_cpuAffinity;				/// Thread affinity. Defaults to all cores.
 		bool			m_enableWorkStealing : 1;	/// Enable queue-sharing between workers?
 	};
 
@@ -284,11 +323,11 @@ namespace jobsystem
 
 		void Start( size_t index, JobSystemWorker** allWorkers, size_t workerCount )
 		{
-			m_thread = std::thread( &JobSystemWorker::WorkerThreadProc, this );
-
 			m_allWorkers = allWorkers;
 			m_workerCount = workerCount;
 			m_workerIndex = index;
+
+			m_thread = std::thread( &JobSystemWorker::WorkerThreadProc, this );
 		}
 
 		void Shutdown( bool wait = true )
@@ -311,7 +350,7 @@ namespace jobsystem
 		JobStatePtr PushJob( JobDelegate delegate )
 		{
 			JobQueueEntry entry = { delegate, std::make_shared<JobState>() };
-			entry.m_state->SetActive();
+			entry.m_state->SetQueued();
 
 			{
 				std::lock_guard<std::mutex> queueLock( m_queueLock );
@@ -335,43 +374,46 @@ namespace jobsystem
 			#endif // JOBSYSTEM_ENABLE_PROFILING
 		}
 
-		bool PopJobFromQueue( JobQueue& queue, JobQueueEntry& job, bool& hasUnsatisfiedDependencies )
+		bool PopJobFromQueue( JobQueue& queue, JobQueueEntry& job, bool& hasUnsatisfiedDependencies, affinity_t workerAffinity )
 		{
 			for( auto jobIter = queue.begin(); jobIter != queue.end(); )
 			{
 				const JobQueueEntry& candidate = (*jobIter);
 
-				if( candidate.m_state->AwaitingCancellation() )
+				if( ( workerAffinity & candidate.m_state->m_workerAffinity ) != 0 )
 				{
-					job.m_state->SetDone();
-					jobIter = queue.erase( jobIter );
-				}
-				else if( candidate.m_state->AreDependenciesMet() )
-				{
-					job = candidate;
-					queue.erase( jobIter );
+					if( candidate.m_state->AwaitingCancellation() )
+					{
+						job.m_state->SetDone();
+						jobIter = queue.erase( jobIter );
 
-					NotifyEventObserver( job, eJobEvent_JobPopped, m_workerIndex );
+						continue;
+					}
+					else if( candidate.m_state->AreDependenciesMet() )
+					{
+						job = candidate;
+						queue.erase( jobIter );
 
-					return true;
+						NotifyEventObserver( job, eJobEvent_JobPopped, m_workerIndex );
+
+						return true;
+					}
 				}
-				else
-				{
-					hasUnsatisfiedDependencies = true;
-					++jobIter;
-				}
+
+				hasUnsatisfiedDependencies = true;
+				++jobIter;
 			}
 
 			return false;
 		}
 
-		bool PopNextJob( JobQueueEntry& job, bool& hasUnsatisfiedDependencies, bool useWorkStealing )
+		bool PopNextJob( JobQueueEntry& job, bool& hasUnsatisfiedDependencies, bool useWorkStealing, affinity_t workerAffinity )
 		{
 			bool foundJob = false;
 
 			{
 				std::lock_guard<std::mutex> queueLock( m_queueLock );
-				foundJob = PopJobFromQueue( m_queue, job, hasUnsatisfiedDependencies );
+				foundJob = PopJobFromQueue( m_queue, job, hasUnsatisfiedDependencies, workerAffinity );
 			}
 
 			if( !foundJob && useWorkStealing )
@@ -383,7 +425,7 @@ namespace jobsystem
 					
 					{
 						std::lock_guard<std::mutex> queueLock( worker.m_queueLock );
-						foundJob = PopJobFromQueue( worker.m_queue, job, hasUnsatisfiedDependencies );
+						foundJob = PopJobFromQueue( worker.m_queue, job, hasUnsatisfiedDependencies, workerAffinity );
 					}
 				}
 
@@ -427,8 +469,10 @@ namespace jobsystem
 			SetThreadName( m_desc.m_name.c_str() );			
 
 			#if defined(WINDOWS)
-			SetThreadAffinityMask( m_thread.native_handle(), m_desc.m_affinity );
+			SetThreadAffinityMask( m_thread.native_handle(), m_desc.m_cpuAffinity );
 			#endif // WINDOWS
+
+			const affinity_t workerAffinity = CalculateSafeWorkerAffinity( m_workerIndex, m_workerCount );
 
 			while( true )
 			{
@@ -439,7 +483,7 @@ namespace jobsystem
 					bool hasUnsatisfiedDependencies;
 
 					while(	!m_stop.load( std::memory_order_relaxed ) &&
-							!PopNextJob( job, hasUnsatisfiedDependencies, m_desc.m_enableWorkStealing ) )
+							!PopNextJob( job, hasUnsatisfiedDependencies, m_desc.m_enableWorkStealing, workerAffinity ) )
 					{
 						s_signalThreads.wait( signalLock );
 						NotifyEventObserver( job, eJobEvent_WorkerAwoken, m_workerIndex );
@@ -651,6 +695,8 @@ namespace jobsystem
 		{
 			assert( state->m_ready.load( std::memory_order_acquire ) );
 
+			const size_t workerAffinity = affinity_t(~0);
+
 			// Steal jobs from workers until the specified job is done.
 			while( !state->IsDone() )
 			{
@@ -659,7 +705,7 @@ namespace jobsystem
 				JobQueueEntry job;
 				bool hasUnsatisfiedDependencies;
 
-				if( m_workers[0]->PopNextJob( job, hasUnsatisfiedDependencies, true ) )
+				if( m_workers[0]->PopNextJob( job, hasUnsatisfiedDependencies, true, workerAffinity ) )
 				{
 					Observer( job, eJobEvent_JobStart, m_workers.size(), job.m_state->m_jobId );
 					job.m_delegate();
@@ -685,6 +731,8 @@ namespace jobsystem
 
 			// Steal and run jobs from workers until all queues are exhausted.
 
+			const size_t workerAffinity = affinity_t(~0);
+
 			JobQueueEntry job;
 			bool foundBusyWorker = true;
 
@@ -694,7 +742,7 @@ namespace jobsystem
 
 				for( JobSystemWorker* worker : m_workers )
 				{
-					if( worker->PopNextJob( job, foundBusyWorker, false ) )
+					if( worker->PopNextJob( job, foundBusyWorker, false, workerAffinity ) )
 					{
 						Observer( job, eJobEvent_JobStart, m_workers.size(), job.m_state->m_jobId );
 						job.m_delegate();

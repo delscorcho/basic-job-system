@@ -1,0 +1,22 @@
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+*.pdb
+*.ilk
+
+# [BLM] Visual Studio Local
+*.suo
+*.sdf
+*.opensdf
+*.ncb
+*.user
+*.tlog
+*.log
+*.lastbuildstate
+Debug/
+*.ib_pdb_index
+*.successfulbuild
+*.unsuccessfulbuild
+bin/
