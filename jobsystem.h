@@ -83,7 +83,7 @@ namespace jobsystem
         std::atomic<int>            m_dependencies;     ///< Number of outstanding dependencies.
 
         std::atomic<bool>           m_done;             ///< Has the job executed to completion?
-        std::condition_variable	    m_doneSignal;
+        std::condition_variable     m_doneSignal;
         std::mutex                  m_doneMutex;
 
         affinity_t                  m_workerAffinity;   ///< Option to limit execution to specific worker threads / cores.
@@ -937,24 +937,24 @@ namespace jobsystem
      * jobsystem::JobManager jobManager;
      * ...
      * jobsystem::JobChainBuilder<128>(jobManager)
-     * 	.Do(something, 'a')
-     * 	.Then()
-     * 	.Do(somethingAfterThat, 'b')
-     * 	.Then()
-     * 	.Together()
-     * 		.Do(parallelThing1, 'c')
-     * 		.Do(parallelThing2, 'd')
-     * 		.Do(parallelThing3, 'e')
-     * 	.Close()
-     * 	.Then()
-     * 	.Do(finalThing, 'F')
-     * 	.Go()
+     *  .Do(something, 'a')
+     *  .Then()
+     *  .Do(somethingAfterThat, 'b')
+     *  .Then()
+     *  .Together()
+     *      .Do(parallelThing1, 'c')
+     *      .Do(parallelThing2, 'd')
+     *      .Do(parallelThing3, 'e')
+     *  .Close()
+     *  .Then()
+     *  .Do(finalThing, 'F')
+     *  .Go()
      * .WaitForAll();
-     **									  --- parallelThing1 ---
-     *									 /				        \
-     * something -> somethingAfterThat -> --- parallelThing2 ---- -> finalThing
-     *									 \				        /
-     *									  --- parallelThing3 ---
+     **                                    --- parallelThing1 ---
+     *                                   /                       \
+     *  something -> somethingAfterThat -> --- parallelThing2 ---- -> finalThing
+     *                                   \                       /
+     *                                     --- parallelThing3 ---
      * etc...
      *
      */
@@ -1132,20 +1132,20 @@ namespace jobsystem
             mgr.AssistUntilJobDone(m_joinJob);
         }
 
-        JobManager&					mgr;						///< Job manager to submit jobs to.
+        JobManager&                 mgr;                        ///< Job manager to submit jobs to.
 
-        Node						m_nodePool[MaxJobNodes];	///< Pool of chain nodes (on the stack). The only necessary output of this system is jobs. Nodes are purely internal.
-        size_t						m_nextNodeIndex;			///< Next free item in the pool.
+        Node                        m_nodePool[MaxJobNodes];    ///< Pool of chain nodes (on the stack). The only necessary output of this system is jobs. Nodes are purely internal.
+        size_t                      m_nextNodeIndex;            ///< Next free item in the pool.
 
-        std::vector<Node*>			m_stack;					///< Internal stack to track groupings.
-        std::vector<JobStatePtr>	m_allJobs;					///< All jobs created by the builder, to be readied on completion.
+        std::vector<Node*>          m_stack;                    ///< Internal stack to track groupings.
+        std::vector<JobStatePtr>    m_allJobs;                  ///< All jobs created by the builder, to be readied on completion.
 
-        Node*						m_last;						///< Last job to be pushed, to handle setting up dependencies after Then() calls.
-        Node*						m_dependency;				///< Any job promoted to a dependency for the next job, as dicated by Then().
+        Node*                       m_last;                     ///< Last job to be pushed, to handle setting up dependencies after Then() calls.
+        Node*                       m_dependency;               ///< Any job promoted to a dependency for the next job, as dicated by Then().
 
-        JobStatePtr					m_joinJob;					///< Final join job that callers can wait on to complete the batch.
+        JobStatePtr                 m_joinJob;                  ///< Final join job that callers can wait on to complete the batch.
 
-        bool						m_failed;					///< Did an error occur during creation of the DAG?
+        bool                        m_failed;                   ///< Did an error occur during creation of the DAG?
     };
 
 
