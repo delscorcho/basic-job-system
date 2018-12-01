@@ -5,7 +5,6 @@
 #pragma once
 
 #include <vector>
-#include <list>
 #include <deque>
 #include <array>
 #include <thread>
