@@ -15,17 +15,17 @@
 #include <memory>
 
 #ifdef WIN32
-#	define WINDOWS
+#   define WINDOWS
 #endif
 
 #ifdef WINDOWS
-#	define WIN32_LEAN_AND_MEAN
-#	include <windows.h>
-#	undef min
-#	undef max
+#   define WIN32_LEAN_AND_MEAN
+#   include <windows.h>
+#   undef min
+#   undef max
 #endif
 
-#define JOBSYSTEM_ENABLE_PROFILING						///< Enables profiling visualization and basic stats, displayed on JobManager destruction.
+#define JOBSYSTEM_ENABLE_PROFILING                      ///< Enables profiling visualization and basic stats, displayed on JobManager destruction.
 
 #ifdef USER_ASSERT
 #define JOB_SYSTEM_ASSERT(cond, ...) USER_ASSERT(cond, __VA_ARGS__)
@@ -37,23 +37,23 @@ namespace jobsystem
 {
     size_t GetBit(size_t n) { return 1 << n; }
 
-    typedef std::function<void()> JobDelegate;			///< Structure of callbacks that can be requested as jobs.
+    typedef std::function<void()> JobDelegate;          ///< Structure of callbacks that can be requested as jobs.
 
     typedef unsigned int affinity_t;
 
     /**
      * Global system components.
      */
-    std::atomic<size_t>				s_nextJobId = 0;	///< Job ID assignment for debugging / profiling.
-    std::mutex						s_signalLock;		///< Global mutex for worker signaling.
-    std::condition_variable			s_signalThreads;	///< Global condition var for worker signaling.
-    std::atomic<size_t>				s_activeWorkers = 0;
+    std::atomic<size_t>             s_nextJobId = 0;    ///< Job ID assignment for debugging / profiling.
+    std::mutex                      s_signalLock;       ///< Global mutex for worker signaling.
+    std::condition_variable         s_signalThreads;    ///< Global condition var for worker signaling.
+    std::atomic<size_t>             s_activeWorkers = 0;
 
     inline affinity_t CalculateSafeWorkerAffinity(size_t workerIndex, size_t workerCount)
     {
-        affinity_t affinity = (affinity_t)~0;	// Set all bits so jobs with affinities out of range can still be processed.
-        affinity &= ~(workerCount - 1);		// Wipe bits within valid range.
-        affinity |= GetBit(workerIndex);		// Set worker-specific bit.
+        affinity_t affinity = (affinity_t)~0;   // Set all bits so jobs with affinities out of range can still be processed.
+        affinity &= ~(workerCount - 1);         // Wipe bits within valid range.
+        affinity |= GetBit(workerIndex);        // Set worker-specific bit.
 
         return affinity;
     }
@@ -76,20 +76,20 @@ namespace jobsystem
         friend class JobSystemWorker;
         friend class JobManager;
 
-        std::atomic<bool>			m_cancel;			///< Is the job pending cancellation?
-        std::atomic<bool>			m_ready;			///< Has the job been marked as ready for processing?
+        std::atomic<bool>           m_cancel;           ///< Is the job pending cancellation?
+        std::atomic<bool>           m_ready;            ///< Has the job been marked as ready for processing?
 
-        std::vector<JobStatePtr>	m_dependants;		///< List of dependent jobs.
-        std::atomic<int>			m_dependencies;		///< Number of outstanding dependencies.
+        std::vector<JobStatePtr>    m_dependants;       ///< List of dependent jobs.
+        std::atomic<int>            m_dependencies;     ///< Number of outstanding dependencies.
 
-        std::atomic<bool>			m_done;				///< Has the job executed to completion?
-        std::condition_variable		m_doneSignal;
-        std::mutex					m_doneMutex;
+        std::atomic<bool>           m_done;             ///< Has the job executed to completion?
+        std::condition_variable	    m_doneSignal;
+        std::mutex                  m_doneMutex;
 
-        affinity_t					m_workerAffinity;	///< Option to limit execution to specific worker threads / cores.
+        affinity_t                  m_workerAffinity;   ///< Option to limit execution to specific worker threads / cores.
 
-        size_t						m_jobId;			///< Debug/profiling ID.
-        char						m_debugChar;		///< Debug character for profiling display.
+        size_t                      m_jobId;            ///< Debug/profiling ID.
+        char                        m_debugChar;        ///< Debug character for profiling display.
 
 
         void SetQueued()
@@ -101,7 +101,7 @@ namespace jobsystem
         {
             JOB_SYSTEM_ASSERT(!IsDone());
 
-            for (JobStatePtr dependant : m_dependants)
+            for (const JobStatePtr& dependant : m_dependants)
             {
                 dependant->m_dependencies.fetch_sub(1, std::memory_order_relaxed);
             }
@@ -186,9 +186,9 @@ namespace jobsystem
                 {
                     m_doneSignal.wait(lock,
                         [this]()
-                    {
-                        return IsDone();
-                    }
+                        {
+                            return IsDone();
+                        }
                     );
                 }
                 else
@@ -228,8 +228,8 @@ namespace jobsystem
      */
     struct JobQueueEntry
     {
-        JobDelegate		m_delegate;		///< Delegate to invoke for the job.
-        JobStatePtr		m_state;		///< Pointer to job state.
+        JobDelegate     m_delegate;     ///< Delegate to invoke for the job.
+        JobStatePtr     m_state;        ///< Pointer to job state.
     };
 
     /**
@@ -244,9 +244,9 @@ namespace jobsystem
         {
         }
 
-        std::string		m_name;						///< Worker name, for debug/profiling displays.
-        unsigned int	m_cpuAffinity;				///< Thread affinity. Defaults to all cores.
-        bool			m_enableWorkStealing : 1;	///< Enable queue-sharing between workers?
+        std::string     m_name;                     ///< Worker name, for debug/profiling displays.
+        unsigned int    m_cpuAffinity;              ///< Thread affinity. Defaults to all cores.
+        bool            m_enableWorkStealing : 1;   ///< Enable queue-sharing between workers?
     };
 
     /**
@@ -254,19 +254,19 @@ namespace jobsystem
      */
     enum EJobEvent
     {
-        eJobEvent_JobPopped,			///< A job was popped from a queue.
-        eJobEvent_JobStart,				///< A job is about to start.
-        eJobEvent_JobDone,				///< A job just completed.
-        eJobEvent_JobRun,				///< A job has been completed.
-        eJobEvent_JobRunAssisted,		///< A job has been completed through outside assistance.
-        eJobEvent_JobStolen,			///< A worker has stolen a job from another worker. 
-        eJobEvent_WorkerAwoken,			///< A worker has been awoken.
-        eJobEvent_WorkerUsed,			///< A worker has been utilized.
+        eJobEvent_JobPopped,            ///< A job was popped from a queue.
+        eJobEvent_JobStart,             ///< A job is about to start.
+        eJobEvent_JobDone,              ///< A job just completed.
+        eJobEvent_JobRun,               ///< A job has been completed.
+        eJobEvent_JobRunAssisted,       ///< A job has been completed through outside assistance.
+        eJobEvent_JobStolen,            ///< A worker has stolen a job from another worker. 
+        eJobEvent_WorkerAwoken,         ///< A worker has been awoken.
+        eJobEvent_WorkerUsed,           ///< A worker has been utilized.
     };
 
-    typedef std::function<void(const JobQueueEntry& job, EJobEvent, size_t, size_t)> JobEventObserver;	///< Delegate definition for job event observation.
+    typedef std::function<void(const JobQueueEntry& job, EJobEvent, size_t, size_t)> JobEventObserver;  ///< Delegate definition for job event observation.
 
-    typedef std::deque<JobQueueEntry> JobQueue;		///< Data structure to represent job queue.
+    typedef std::deque<JobQueueEntry> JobQueue;     ///< Data structure to represent job queue.
 
     /**
      * High-res clock based on windows performance counter. Supports STL chrono interfaces.
@@ -305,17 +305,17 @@ namespace jobsystem
 
         struct TimelineEntry
         {
-            size_t							jobId;					///< ID of the job that generated this timeline entry.
-            ProfileClock::time_point		start;					///< Job start time.
-            ProfileClock::time_point		end;					///< Job end time.
-            char							debugChar;				///< Job's debug character for profiling display.
+            size_t                          jobId;                  ///< ID of the job that generated this timeline entry.
+            ProfileClock::time_point        start;                  ///< Job start time.
+            ProfileClock::time_point        end;	                ///< Job end time.
+            char                            debugChar;              ///< Job's debug character for profiling display.
 
-            std::string						description;			///< Timeline entry description.
+            std::string                     description;            ///< Timeline entry description.
         };
 
         typedef std::vector<TimelineEntry> TimelineEntries;
 
-        TimelineEntries						m_entries;				///< List of timeline entries for this thread.
+        TimelineEntries                     m_entries;              //< List of timeline entries for this thread.
     };
 
     /**
@@ -534,19 +534,19 @@ namespace jobsystem
             }
         }
 
-        std::thread					m_thread;					///< Thread instance for worker.
-        std::atomic<bool>			m_stop;						///< Has a stop been requested?
-        std::atomic<bool>			m_hasShutDown;				///< Has the worker completed shutting down?
+        std::thread                 m_thread;                   ///< Thread instance for worker.
+        std::atomic<bool>           m_stop;                     ///< Has a stop been requested?
+        std::atomic<bool>           m_hasShutDown;              ///< Has the worker completed shutting down?
 
-        mutable std::mutex			m_queueLock;				///< Mutex to guard worker queue.
-        JobQueue					m_queue;					///< Queue containing requested jobs.
+        mutable std::mutex          m_queueLock;                ///< Mutex to guard worker queue.
+        JobQueue                    m_queue;                    ///< Queue containing requested jobs.
 
-        JobSystemWorker**			m_allWorkers;				///< Pointer to array of all workers, for queue-sharing / work-stealing.
-        size_t						m_workerCount;				///< Number of total workers (size of m_allWorkers array).
-        size_t						m_workerIndex;				///< This worker's index within m_allWorkers.
+        JobSystemWorker**           m_allWorkers;               ///< Pointer to array of all workers, for queue-sharing / work-stealing.
+        size_t                      m_workerCount;              ///< Number of total workers (size of m_allWorkers array).
+        size_t                      m_workerIndex;              ///< This worker's index within m_allWorkers.
 
-        JobEventObserver			m_eventObserver;			///< Observer of job-related events occurring on this worker.
-        JobWorkerDescriptor			m_desc;						///< Descriptor/configuration of this worker.
+        JobEventObserver            m_eventObserver;            ///< Observer of job-related events occurring on this worker.
+        JobWorkerDescriptor         m_desc;                     ///< Descriptor/configuration of this worker.
     };
 
     /**
@@ -555,7 +555,7 @@ namespace jobsystem
      */
     struct JobManagerDesciptor
     {
-        std::vector<JobWorkerDescriptor>	m_workers;			///< Configurations for all workers that should be spawned by JobManager.
+        std::vector<JobWorkerDescriptor> m_workers;             ///< Configurations for all workers that should be spawned by JobManager.
     };
 
     /**
@@ -812,23 +812,23 @@ namespace jobsystem
 
     private:
 
-        size_t							m_nextRoundRobinWorkerIndex;			///< Index of the worker to receive the next requested job, round-robin style.
+        size_t                          m_nextRoundRobinWorkerIndex;    ///< Index of the worker to receive the next requested job, round-robin style.
 
-        std::atomic<unsigned int>		m_jobsRun;								///< Counter to track # of jobs run.
-        std::atomic<unsigned int>		m_jobsAssisted;							///< Counter to track # of jobs run via external Assist*().
-        std::atomic<unsigned int>		m_jobsStolen;							///< Counter to track # of jobs stolen from another worker's queue.
-        std::atomic<unsigned int>		m_usedMask;								///< Mask with bits set according to the IDs of the jobs that have executed jobs.
-        std::atomic<unsigned int>		m_awokenMask;							///< Mask with bits set according to the IDs of the jobs that have been awoken at least once.
+        std::atomic<unsigned int>       m_jobsRun;                      ///< Counter to track # of jobs run.
+        std::atomic<unsigned int>       m_jobsAssisted;                 ///< Counter to track # of jobs run via external Assist*().
+        std::atomic<unsigned int>       m_jobsStolen;                   ///< Counter to track # of jobs stolen from another worker's queue.
+        std::atomic<unsigned int>       m_usedMask;                     ///< Mask with bits set according to the IDs of the jobs that have executed jobs.
+        std::atomic<unsigned int>       m_awokenMask;                   ///< Mask with bits set according to the IDs of the jobs that have been awoken at least once.
 
     private:
 
-        JobManagerDesciptor				m_desc;									///< Descriptor/configuration of the job manager.
+        JobManagerDesciptor             m_desc;                         ///< Descriptor/configuration of the job manager.
 
-        bool							m_hasPushedJob;							///< For profiling - has a job been pushed yet?
-        ProfileClock::time_point		m_firstJobTime;							///< For profiling - when was the first job pushed?
-        ProfilingTimeline*				m_timelines;							///< For profiling - a ProfilingTimeline entry for each worker, plus an additional entry to represent the Assist thread.
+        bool                            m_hasPushedJob;                 ///< For profiling - has a job been pushed yet?
+        ProfileClock::time_point        m_firstJobTime;                 ///< For profiling - when was the first job pushed?
+        ProfilingTimeline*              m_timelines;                    ///< For profiling - a ProfilingTimeline entry for each worker, plus an additional entry to represent the Assist thread.
 
-        std::vector<JobSystemWorker*>	m_workers;								///< Storage for worker instances.
+        std::vector<JobSystemWorker*>   m_workers;                      ///< Storage for worker instances.
 
         void DumpProfilingResults()
         {
@@ -884,7 +884,10 @@ namespace jobsystem
                 const size_t remaining = bufferSize - nameLen - 2;
 
                 for (size_t nameIdx = nameLen; nameIdx < bufferSize - 2; ++nameIdx)
+                {
                     buffer[nameIdx] = '-';
+                }
+
                 buffer[bufferSize - 2] = '\n';
                 buffer[bufferSize - 1] = 0;
 
