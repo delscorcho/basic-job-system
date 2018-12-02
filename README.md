@@ -1,4 +1,4 @@
-## Basic C++ Job System (Requires C++11)
+## C++ Job System (Requires C++11)
 
 Implements a typical job system with features I've found useful in practice (Games, mostly).
 
