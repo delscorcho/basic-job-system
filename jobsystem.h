@@ -4,6 +4,18 @@
 
 #pragma once
 
+#ifdef WIN32
+#   define WINDOWS
+#endif
+
+#ifdef WINDOWS
+#   define NOMINMAX
+#   define STRICT
+#   define WIN32_LEAN_AND_MEAN
+#   include <windows.h>
+#endif
+
+#include <algorithm>
 #include <vector>
 #include <deque>
 #include <array>
@@ -14,25 +26,6 @@
 #include <condition_variable>
 #include <memory>
 
-#ifdef WIN32
-#   define WINDOWS
-#endif
-
-#ifdef WINDOWS
-#   define WIN32_LEAN_AND_MEAN
-#   include <windows.h>
-#   undef min
-#   undef max
-#endif
-
-#define JOBSYSTEM_ENABLE_PROFILING                      ///< Enables profiling visualization and basic stats, displayed on JobManager destruction.
-
-#ifdef USER_ASSERT
-#define JOB_SYSTEM_ASSERT(cond, ...) USER_ASSERT(cond, __VA_ARGS__)
-#else
-#define JOB_SYSTEM_ASSERT(cond, ...)
-#endif
-
 namespace jobsystem
 {
     size_t GetBit(size_t n) { return 1 << n; }
@@ -40,6 +33,8 @@ namespace jobsystem
     typedef std::function<void()> JobDelegate;          ///< Structure of callbacks that can be requested as jobs.
 
     typedef unsigned int affinity_t;
+
+    static const affinity_t kAffinityAllBits = static_cast<affinity_t>(~0);
 
     /**
      * Global system components.
@@ -51,7 +46,7 @@ namespace jobsystem
 
     inline affinity_t CalculateSafeWorkerAffinity(size_t workerIndex, size_t workerCount)
     {
-        affinity_t affinity = (affinity_t)~0;   // Set all bits so jobs with affinities out of range can still be processed.
+        affinity_t affinity = kAffinityAllBits; // Set all bits so jobs with affinities out of range can still be processed.
         affinity &= ~(workerCount - 1);         // Wipe bits within valid range.
         affinity |= GetBit(workerIndex);        // Set worker-specific bit.
 
@@ -99,7 +94,7 @@ namespace jobsystem
 
         void SetDone()
         {
-            JOB_SYSTEM_ASSERT(!IsDone());
+            JOBSYSTEM_ASSERT(!IsDone());
 
             for (const JobStatePtr& dependant : m_dependants)
             {
@@ -122,7 +117,7 @@ namespace jobsystem
             : m_debugChar(0)
         {
             m_jobId = s_nextJobId++;
-            m_workerAffinity = (affinity_t)~0;
+            m_workerAffinity = kAffinityAllBits;
 
             m_dependencies.store(0, std::memory_order_release);
             m_cancel.store(false, std::memory_order_release);
@@ -134,7 +129,7 @@ namespace jobsystem
 
         JobState& SetReady()
         {
-            JOB_SYSTEM_ASSERT(!IsDone());
+            JOBSYSTEM_ASSERT(!IsDone());
 
             m_cancel.store(false, std::memory_order_relaxed);
             m_ready.store(true, std::memory_order_release);
@@ -146,7 +141,7 @@ namespace jobsystem
 
         JobState& Cancel()
         {
-            JOB_SYSTEM_ASSERT(!IsDone());
+            JOBSYSTEM_ASSERT(!IsDone());
 
             m_cancel.store(true, std::memory_order_relaxed);
 
@@ -155,7 +150,7 @@ namespace jobsystem
 
         JobState& AddDependant(JobStatePtr dependant)
         {
-            JOB_SYSTEM_ASSERT(m_dependants.end() == std::find(m_dependants.begin(), m_dependants.end(), dependant));
+            JOBSYSTEM_ASSERT(m_dependants.end() == std::find(m_dependants.begin(), m_dependants.end(), dependant));
 
             m_dependants.push_back(dependant);
 
@@ -166,7 +161,7 @@ namespace jobsystem
 
         JobState& SetWorkerAffinity(affinity_t affinity)
         {
-            m_workerAffinity = affinity ? affinity : (affinity_t)~0;
+            m_workerAffinity = affinity ? affinity : kAffinityAllBits;
 
             return *this;
         }
@@ -438,7 +433,7 @@ namespace jobsystem
             {
                 for (size_t i = 0; foundJob == false && i < m_workerCount; ++i)
                 {
-                    JOB_SYSTEM_ASSERT(m_allWorkers[i]);
+                    JOBSYSTEM_ASSERT(m_allWorkers[i]);
                     JobSystemWorker& worker = *m_allWorkers[i];
 
                     {
@@ -502,7 +497,7 @@ namespace jobsystem
                     bool hasUnsatisfiedDependencies;
 
                     while (!m_stop.load(std::memory_order_relaxed) &&
-                        !PopNextJob(job, hasUnsatisfiedDependencies, m_desc.m_enableWorkStealing, workerAffinity))
+                           !PopNextJob(job, hasUnsatisfiedDependencies, m_desc.m_enableWorkStealing, workerAffinity))
                     {
                         s_signalThreads.wait(signalLock);
                         NotifyEventObserver(job, eJobEvent_WorkerAwoken, m_workerIndex);
@@ -712,14 +707,14 @@ namespace jobsystem
 
         void AssistUntilJobDone(JobStatePtr state)
         {
-            JOB_SYSTEM_ASSERT(state->m_ready.load(std::memory_order_acquire));
+            JOBSYSTEM_ASSERT(state->m_ready.load(std::memory_order_acquire));
 
-            const size_t workerAffinity = affinity_t(~0);
+            const size_t workerAffinity = kAffinityAllBits;
 
             // Steal jobs from workers until the specified job is done.
             while (!state->IsDone())
             {
-                JOB_SYSTEM_ASSERT(!m_workers.empty());
+                JOBSYSTEM_ASSERT(!m_workers.empty());
 
                 JobQueueEntry job;
                 bool hasUnsatisfiedDependencies;
@@ -741,11 +736,11 @@ namespace jobsystem
 
         void AssistUntilDone()
         {
-            JOB_SYSTEM_ASSERT(!m_workers.empty());
+            JOBSYSTEM_ASSERT(!m_workers.empty());
 
             // Steal and run jobs from workers until all queues are exhausted.
 
-            const size_t workerAffinity = affinity_t(~0);
+            const size_t workerAffinity = kAffinityAllBits;
 
             JobQueueEntry job;
             bool foundBusyWorker = true;
@@ -777,7 +772,7 @@ namespace jobsystem
             {
                 if (!worker->m_queue.empty())
                 {
-                    JOB_SYSTEM_ASSERT(0);
+                    JOBSYSTEM_ASSERT(0);
                 }
             }
         }
@@ -794,7 +789,7 @@ namespace jobsystem
             // Don't destruct workers yet, in case someone's in the process of work-stealing.
             for (size_t i = 0, n = m_workers.size(); i < n; ++i)
             {
-                JOB_SYSTEM_ASSERT(m_workers[i]);
+                JOBSYSTEM_ASSERT(m_workers[i]);
                 m_workers[i]->Shutdown();
             }
 
@@ -915,7 +910,7 @@ namespace jobsystem
 
                     for (size_t i = startIndex + shift; i <= endIndex + shift; ++i)
                     {
-                        JOB_SYSTEM_ASSERT(i < bufferSize - 2);
+                        JOBSYSTEM_ASSERT(i < bufferSize - 2);
                         buffer[i] = jobCharacter;
                     }
                 }
