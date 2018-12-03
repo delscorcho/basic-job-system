@@ -11,5 +11,6 @@ Features include:
 - Bare-bones but useful "profiler" showing a timeline for each worker with utilization over time. Jobs can be submitted with an optional "debug character", which allows one to visualize when specific jobs ran, for how long, and on which workers.
 - Simple, straightforward, easy to modify. 
 - No silly super modern C++, so does not rely on brand new compiler versions and potentially buggy STL implementations.
+- MIT permissive license.
 
 **Bug fixes, suggestions, complaints, and any knowledge I lack** is more than welcome. This isn't something I've iterated on heavily, and certainly wouldn't consider myself an expert in job system research.
