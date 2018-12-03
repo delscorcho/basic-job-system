@@ -1,4 +1,4 @@
-## C++ Job System (Requires C++11+)
+## C++ Job System (Requires C++11 but nothing newer than that)
 
 Implements a typical job system with features I've found useful in practice (Games, mostly).
 
@@ -9,6 +9,8 @@ Features include:
 - Full support for job dependency graphs.
 - External thread-assist: Any thread outside of the worker pool can temporarily assist in job processing until some particular job is complete. A surprising percentage of production job systems lack this, leaving the producer thread to block/wait for jobs to be completed by the worker pool, which depending on your thread configuration can be a huge waste.
 - Bare-bones but useful "profiler" showing a timeline for each worker with utilization over time. Jobs can be submitted with an optional "debug character", which allows one to visualize when specific jobs ran, for how long, and on which workers.
+- Simple, straightforward, easy to modify. 
+- No silly super modern C++, so does not rely on brand new compiler versions and potentially buggy implementations.
 
 Examples and unit tests exist, but I need to de-crud them before submitting.
 
