@@ -4,7 +4,7 @@
 
 #pragma once
 
-#ifdef WIN32
+#if defined(WIN32) || defined(WIN64)
 #   define WINDOWS
 #endif
 
@@ -28,11 +28,11 @@
 
 namespace jobsystem
 {
-    size_t GetBit(size_t n) { return 1 << n; }
+    uint64_t GetBit(uint64_t n) { return static_cast<uint64_t>(1) << n; }
 
     typedef std::function<void()> JobDelegate;          ///< Structure of callbacks that can be requested as jobs.
 
-    typedef unsigned int affinity_t;
+    typedef uint64_t affinity_t;
 
     static const affinity_t kAffinityAllBits = static_cast<affinity_t>(~0);
 
@@ -259,7 +259,7 @@ namespace jobsystem
         eJobEvent_WorkerUsed,           ///< A worker has been utilized.
     };
 
-    typedef std::function<void(const JobQueueEntry& job, EJobEvent, size_t, size_t)> JobEventObserver;  ///< Delegate definition for job event observation.
+    typedef std::function<void(const JobQueueEntry& job, EJobEvent, uint64_t, size_t)> JobEventObserver;  ///< Delegate definition for job event observation.
 
     typedef std::deque<JobQueueEntry> JobQueue;     ///< Data structure to represent job queue.
 
@@ -300,7 +300,7 @@ namespace jobsystem
 
         struct TimelineEntry
         {
-            size_t                          jobId;                  ///< ID of the job that generated this timeline entry.
+            uint64_t                        jobId;                  ///< ID of the job that generated this timeline entry.
             ProfileClock::time_point        start;                  ///< Job start time.
             ProfileClock::time_point        end;	                ///< Job end time.
             char                            debugChar;              ///< Job's debug character for profiling display.
@@ -375,13 +375,13 @@ namespace jobsystem
 
     private:
 
-        void NotifyEventObserver(const JobQueueEntry& job, EJobEvent event, size_t value, size_t value2 = 0)
+        void NotifyEventObserver(const JobQueueEntry& job, EJobEvent event, uint64_t workerIndex, size_t jobId = 0)
         {
 #ifdef JOBSYSTEM_ENABLE_PROFILING
 
             if (m_eventObserver)
             {
-                m_eventObserver(job, event, value, value2);
+                m_eventObserver(job, event, workerIndex, jobId);
             }
 
 #endif // JOBSYSTEM_ENABLE_PROFILING
@@ -470,7 +470,7 @@ namespace jobsystem
             threadName.dwFlags = 0;
             __try
             {
-                RaiseException(0x406D1388, 0, sizeof(threadName) / sizeof(DWORD), (ULONG_PTR*)&threadName);
+                RaiseException(0x406D1388, 0, sizeof(threadName) / sizeof(ULONG_PTR), (ULONG_PTR*)&threadName);
             }
             __except (EXCEPTION_CONTINUE_EXECUTION)
             {
@@ -560,7 +560,7 @@ namespace jobsystem
     {
     private:
 
-        void Observer(const JobQueueEntry& job, EJobEvent event, size_t value, size_t value2 = 0)
+        void Observer(const JobQueueEntry& job, EJobEvent event, uint64_t workerIndex, size_t jobId = 0)
         {
 #ifdef JOBSYSTEM_ENABLE_PROFILING
             switch (event)
@@ -586,21 +586,21 @@ namespace jobsystem
 
             case eJobEvent_WorkerAwoken:
             {
-                m_awokenMask |= GetBit(value);
+                m_awokenMask |= GetBit(workerIndex);
             }
             break;
 
             case eJobEvent_WorkerUsed:
             {
-                m_usedMask |= GetBit(value);
+                m_usedMask |= GetBit(workerIndex);
             }
             break;
 
             case eJobEvent_JobStart:
             {
-                auto& timeline = value < m_workers.size() ? m_timelines[value] : m_timelines[m_workers.size()];
+                auto& timeline = workerIndex < m_workers.size() ? m_timelines[workerIndex] : m_timelines[m_workers.size()];
                 ProfilingTimeline::TimelineEntry entry;
-                entry.jobId = value2;
+                entry.jobId = jobId;
                 entry.start = ProfileClock::now();
                 entry.debugChar = job.m_state ? job.m_state->m_debugChar : 0;
                 timeline.m_entries.push_back(entry);
@@ -609,7 +609,7 @@ namespace jobsystem
 
             case eJobEvent_JobDone:
             {
-                auto& timeline = value < m_workers.size() ? m_timelines[value] : m_timelines[m_workers.size()];
+                auto& timeline = workerIndex < m_workers.size() ? m_timelines[workerIndex] : m_timelines[m_workers.size()];
                 auto& entry = timeline.m_entries.back();
                 entry.end = ProfileClock::now();
             }
@@ -709,7 +709,7 @@ namespace jobsystem
         {
             JOBSYSTEM_ASSERT(state->m_ready.load(std::memory_order_acquire));
 
-            const size_t workerAffinity = kAffinityAllBits;
+            const affinity_t workerAffinity = kAffinityAllBits;
 
             // Steal jobs from workers until the specified job is done.
             while (!state->IsDone())
@@ -740,7 +740,7 @@ namespace jobsystem
 
             // Steal and run jobs from workers until all queues are exhausted.
 
-            const size_t workerAffinity = kAffinityAllBits;
+            const affinity_t workerAffinity = kAffinityAllBits;
 
             JobQueueEntry job;
             bool foundBusyWorker = true;
@@ -812,8 +812,8 @@ namespace jobsystem
         std::atomic<unsigned int>       m_jobsRun;                      ///< Counter to track # of jobs run.
         std::atomic<unsigned int>       m_jobsAssisted;                 ///< Counter to track # of jobs run via external Assist*().
         std::atomic<unsigned int>       m_jobsStolen;                   ///< Counter to track # of jobs stolen from another worker's queue.
-        std::atomic<unsigned int>       m_usedMask;                     ///< Mask with bits set according to the IDs of the jobs that have executed jobs.
-        std::atomic<unsigned int>       m_awokenMask;                   ///< Mask with bits set according to the IDs of the jobs that have been awoken at least once.
+        std::atomic<uint64_t>           m_usedMask;                     ///< Mask with bits set according to the IDs of the jobs that have executed jobs.
+        std::atomic<uint64_t>           m_awokenMask;                   ///< Mask with bits set according to the IDs of the jobs that have been awoken at least once.
 
     private:
 
@@ -844,8 +844,8 @@ namespace jobsystem
                 "Jobs Run:       %8d\n" // May be < jobs submitted
                 "Jobs Stolen:    %8d\n"
                 "Jobs Assisted:  %8d\n"
-                "Workers Used:   %u\n"
-                "Workers Awoken: %u\n"
+                "Workers Used:   %llu\n"
+                "Workers Awoken: %llu\n"
                 ,
                 m_jobsRun.load(std::memory_order_acquire),
                 m_jobsStolen.load(std::memory_order_acquire),
