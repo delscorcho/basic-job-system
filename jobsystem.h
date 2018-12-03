@@ -397,7 +397,7 @@ namespace jobsystem
                 {
                     if (candidate.m_state->AwaitingCancellation())
                     {
-                        job.m_state->SetDone();
+                        candidate.m_state->SetDone();
                         jobIter = queue.erase(jobIter);
 
                         continue;
@@ -598,7 +598,7 @@ namespace jobsystem
 
             case eJobEvent_JobStart:
             {
-                auto& timeline = workerIndex < m_workers.size() ? m_timelines[workerIndex] : m_timelines[m_workers.size()];
+                ProfilingTimeline& timeline = workerIndex < m_workers.size() ? m_timelines[workerIndex] : m_timelines[m_workers.size()];
                 ProfilingTimeline::TimelineEntry entry;
                 entry.jobId = jobId;
                 entry.start = ProfileClock::now();
@@ -609,8 +609,8 @@ namespace jobsystem
 
             case eJobEvent_JobDone:
             {
-                auto& timeline = workerIndex < m_workers.size() ? m_timelines[workerIndex] : m_timelines[m_workers.size()];
-                auto& entry = timeline.m_entries.back();
+                ProfilingTimeline& timeline = workerIndex < m_workers.size() ? m_timelines[workerIndex] : m_timelines[m_workers.size()];
+                ProfilingTimeline::TimelineEntry& entry = timeline.m_entries.back();
                 entry.end = ProfileClock::now();
             }
             break;
@@ -690,6 +690,9 @@ namespace jobsystem
         JobStatePtr AddJob(JobDelegate delegate, char debugChar = 0)
         {
             JobStatePtr state = nullptr;
+
+            // \todo - workers should maintain a tls pointer to themselves, so we can push
+            // directly into our own queue.
 
             if (!m_workers.empty())
             {
@@ -812,8 +815,8 @@ namespace jobsystem
         std::atomic<unsigned int>       m_jobsRun;                      ///< Counter to track # of jobs run.
         std::atomic<unsigned int>       m_jobsAssisted;                 ///< Counter to track # of jobs run via external Assist*().
         std::atomic<unsigned int>       m_jobsStolen;                   ///< Counter to track # of jobs stolen from another worker's queue.
-        std::atomic<uint64_t>           m_usedMask;                     ///< Mask with bits set according to the IDs of the jobs that have executed jobs.
-        std::atomic<uint64_t>           m_awokenMask;                   ///< Mask with bits set according to the IDs of the jobs that have been awoken at least once.
+        std::atomic<affinity_t>         m_usedMask;                     ///< Mask with bits set according to the IDs of the jobs that have executed jobs.
+        std::atomic<affinity_t>         m_awokenMask;                   ///< Mask with bits set according to the IDs of the jobs that have been awoken at least once.
 
     private:
 
@@ -867,7 +870,7 @@ namespace jobsystem
 
             for (size_t workerIndex = 0; workerIndex < workerCount + 1; ++workerIndex)
             {
-                auto& timeline = m_timelines[workerIndex];
+                ProfilingTimeline& timeline = m_timelines[workerIndex];
 
                 const char* name = (workerIndex < workerCount) ? m_workers[workerIndex]->m_desc.m_name.c_str() : "[Assist]";
 
@@ -886,7 +889,7 @@ namespace jobsystem
                 buffer[bufferSize - 2] = '\n';
                 buffer[bufferSize - 1] = 0;
 
-                for (auto& entry : timeline.m_entries)
+                for (ProfilingTimeline::TimelineEntry& entry : timeline.m_entries)
                 {
                     auto startNs = std::chrono::duration_cast<std::chrono::nanoseconds>(entry.start - m_firstJobTime).count();
                     auto endNs = std::chrono::duration_cast<std::chrono::nanoseconds>(entry.end - m_firstJobTime).count();
@@ -1090,11 +1093,16 @@ namespace jobsystem
 
         JobChainBuilder& Go()
         {
+            if (m_allJobs.empty())
+            {
+                return *this;
+            }
+
             Then();
             Do([]() {}, 'J');
             m_joinJob = m_allJobs.back();
 
-            for (auto job : m_allJobs)
+            for (JobStatePtr& job : m_allJobs)
             {
                 job->SetReady();
             }
@@ -1104,11 +1112,12 @@ namespace jobsystem
 
         void Fail()
         {
-            for (auto job : m_allJobs)
+            for (JobStatePtr& job : m_allJobs)
             {
                 job->Cancel();
             }
 
+            m_allJobs.clear();
             m_failed = true;
         }
 
@@ -1119,7 +1128,10 @@ namespace jobsystem
 
         void WaitForAll()
         {
-            m_joinJob->Wait();
+            if (m_joinJob)
+            {
+                m_joinJob->Wait();
+            }
         }
 
         void AssistAndWaitForAll()
