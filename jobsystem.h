@@ -548,7 +548,7 @@ namespace jobsystem
      * Descriptor for configuring the job manager.
      * - Contains descriptor for each worker
      */
-    struct JobManagerDesciptor
+    struct JobManagerDescriptor
     {
         std::vector<JobWorkerDescriptor> m_workers;             ///< Configurations for all workers that should be spawned by JobManager.
     };
@@ -649,7 +649,7 @@ namespace jobsystem
             JoinWorkersAndShutdown();
         }
 
-        bool Create(const JobManagerDesciptor& desc)
+        bool Create(const JobManagerDescriptor& desc)
         {
             JoinWorkersAndShutdown();
 
@@ -820,7 +820,7 @@ namespace jobsystem
 
     private:
 
-        JobManagerDesciptor             m_desc;                         ///< Descriptor/configuration of the job manager.
+        JobManagerDescriptor             m_desc;                         ///< Descriptor/configuration of the job manager.
 
         bool                            m_hasPushedJob;                 ///< For profiling - has a job been pushed yet?
         ProfileClock::time_point        m_firstJobTime;                 ///< For profiling - when was the first job pushed?
@@ -847,8 +847,8 @@ namespace jobsystem
                 "Jobs Run:       %8d\n" // May be < jobs submitted
                 "Jobs Stolen:    %8d\n"
                 "Jobs Assisted:  %8d\n"
-                "Workers Used:   %llu\n"
-                "Workers Awoken: %llu\n"
+                "Workers Used:   %8llu\n"
+                "Workers Awoken: %8llu\n"
                 ,
                 m_jobsRun.load(std::memory_order_acquire),
                 m_jobsStolen.load(std::memory_order_acquire),
