@@ -12,6 +12,4 @@ Features include:
 - Simple, straightforward, easy to modify. 
 - No silly super modern C++, so does not rely on brand new compiler versions and potentially buggy implementations.
 
-Examples and unit tests exist, but I need to de-crud them before submitting.
-
-**Bug fixes, suggestions, complaints, and any knowledge I obviously lack** is more than welcome. This isn't something I've iterated on heavily, and certainly wouldn't consider myself an expert. Please provide feedback!
+**Bug fixes, suggestions, complaints, and any knowledge I lack** is more than welcome. This isn't something I've iterated on heavily, and certainly wouldn't consider myself an expert in job system research.
