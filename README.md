@@ -2,6 +2,8 @@
 
 Implements a typical job system with features I've found useful in practice (Games, mostly).
 
+Currently only tested on Windows, but can trivially port to Linux/Console/etc. Only debug functionality (e.g. thread names) actually relies on Windows at the moment.
+
 Features include:
 - Simple interfaces for submitting, monitoring, and canceling jobs.
 - Easy-to-configure affinities and policies to match workers to cores, as well as jobs to specific workers, which is useful for maximizing data-sharing and cache performance by constraining jobs operating in the same areas of memory to the same cluster(s).
