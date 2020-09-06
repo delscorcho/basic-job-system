@@ -6,6 +6,8 @@
 
 #if defined(WIN32) || defined(WIN64)
 #   define WINDOWS
+#elif defined(__unix__)
+#   define LINUX
 #endif
 
 #ifdef WINDOWS
@@ -25,10 +27,27 @@
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
 
 namespace jobsystem
 {
-    uint64_t GetBit(uint64_t n) { return static_cast<uint64_t>(1) << n; }
+    inline uint64_t GetBit(uint64_t n) 
+    { 
+        return static_cast<uint64_t>(1) << n; 
+    }
+
+    inline size_t CountBits(uint64_t n) 
+    { 
+        size_t bits = 0; 
+        while(n)
+        {
+            bits += n & 1;
+            n >>= 1;
+        }
+        return bits;
+    }
 
     typedef std::function<void()> JobDelegate;          ///< Structure of callbacks that can be requested as jobs.
 
@@ -39,10 +58,10 @@ namespace jobsystem
     /**
      * Global system components.
      */
-    std::atomic<size_t>             s_nextJobId = 0;    ///< Job ID assignment for debugging / profiling.
+    std::atomic<size_t>             s_nextJobId;        ///< Job ID assignment for debugging / profiling.
     std::mutex                      s_signalLock;       ///< Global mutex for worker signaling.
     std::condition_variable         s_signalThreads;    ///< Global condition var for worker signaling.
-    std::atomic<size_t>             s_activeWorkers = 0;
+    std::atomic<size_t>             s_activeWorkers;
 
     inline affinity_t CalculateSafeWorkerAffinity(size_t workerIndex, size_t workerCount)
     {
@@ -232,7 +251,7 @@ namespace jobsystem
      */
     struct JobWorkerDescriptor
     {
-        JobWorkerDescriptor(const char* name = "JobSystemWorker", unsigned int cpuAffinity = 0xffffffff, bool enableWorkSteeling = true)
+        JobWorkerDescriptor(const char* name = "JobSystemWorker", affinity_t cpuAffinity = affinity_t(~0), bool enableWorkSteeling = true)
             : m_name(name)
             , m_cpuAffinity(cpuAffinity)
             , m_enableWorkStealing(enableWorkSteeling)
@@ -240,7 +259,7 @@ namespace jobsystem
         }
 
         std::string     m_name;                     ///< Worker name, for debug/profiling displays.
-        unsigned int    m_cpuAffinity;              ///< Thread affinity. Defaults to all cores.
+        affinity_t      m_cpuAffinity;              ///< Thread affinity. Defaults to all cores.
         bool            m_enableWorkStealing : 1;   ///< Enable queue-sharing between workers?
     };
 
@@ -266,29 +285,10 @@ namespace jobsystem
     /**
      * High-res clock based on windows performance counter. Supports STL chrono interfaces.
      */
-    struct ProfileClock
+    using TimePoint = std::chrono::high_resolution_clock::time_point;
+    TimePoint ProfileClockNow()
     {
-        typedef long long                               rep;
-        typedef std::nano                               period;
-        typedef std::chrono::duration<rep, period>      duration;
-        typedef std::chrono::time_point<ProfileClock>   time_point;
-        static const bool is_steady = true;
-
-        static time_point now();
-    };
-
-    const long long g_Frequency = []() -> long long
-    {
-        LARGE_INTEGER frequency;
-        QueryPerformanceFrequency(&frequency);
-        return frequency.QuadPart;
-    }();
-
-    ProfileClock::time_point ProfileClock::now()
-    {
-        LARGE_INTEGER count;
-        QueryPerformanceCounter(&count);
-        return time_point(duration(count.QuadPart * static_cast<rep>(period::den) / g_Frequency));
+        return std::chrono::high_resolution_clock::now();
     }
 
     /**
@@ -301,8 +301,8 @@ namespace jobsystem
         struct TimelineEntry
         {
             uint64_t                        jobId;                  ///< ID of the job that generated this timeline entry.
-            ProfileClock::time_point        start;                  ///< Job start time.
-            ProfileClock::time_point        end;	                ///< Job end time.
+            TimePoint                       start;                  ///< Job start time.
+            TimePoint                       end;	                ///< Job end time.
             char                            debugChar;              ///< Job's debug character for profiling display.
 
             std::string                     description;            ///< Timeline entry description.
@@ -454,7 +454,7 @@ namespace jobsystem
         void SetThreadName(const char* name)
         {
             (void)name;
-#ifdef WINDOWS
+#if defined(WINDOWS)
             typedef struct tagTHREADNAME_INFO
             {
                 unsigned long dwType; // must be 0x1000
@@ -475,6 +475,8 @@ namespace jobsystem
             __except (EXCEPTION_CONTINUE_EXECUTION)
             {
             }
+#elif defined(LINUX)
+            pthread_setname_np(pthread_self(), name);
 #endif
         }
 
@@ -484,7 +486,17 @@ namespace jobsystem
 
 #if defined(WINDOWS)
             SetThreadAffinityMask(m_thread.native_handle(), m_desc.m_cpuAffinity);
-#endif // WINDOWS
+#elif defined(LINUX)
+            cpu_set_t cpuset; 
+            CPU_ZERO(&cpuset);
+            for(size_t i = 0; i < sizeof(m_desc.m_cpuAffinity) * 8; ++i)
+            {
+                if ((1 << i) & m_desc.m_cpuAffinity)
+                {
+                    CPU_SET(i, &cpuset);
+                }
+            }
+#endif
 
             const affinity_t workerAffinity = CalculateSafeWorkerAffinity(m_workerIndex, m_workerCount);
 
@@ -601,7 +613,7 @@ namespace jobsystem
                 ProfilingTimeline& timeline = workerIndex < m_workers.size() ? m_timelines[workerIndex] : m_timelines[m_workers.size()];
                 ProfilingTimeline::TimelineEntry entry;
                 entry.jobId = jobId;
-                entry.start = ProfileClock::now();
+                entry.start = ProfileClockNow();
                 entry.debugChar = job.m_state ? job.m_state->m_debugChar : 0;
                 timeline.m_entries.push_back(entry);
             }
@@ -611,7 +623,7 @@ namespace jobsystem
             {
                 ProfilingTimeline& timeline = workerIndex < m_workers.size() ? m_timelines[workerIndex] : m_timelines[m_workers.size()];
                 ProfilingTimeline::TimelineEntry& entry = timeline.m_entries.back();
-                entry.end = ProfileClock::now();
+                entry.end = ProfileClockNow();
             }
             break;
 
@@ -619,7 +631,7 @@ namespace jobsystem
             {
                 if (!m_hasPushedJob)
                 {
-                    m_firstJobTime = ProfileClock::now();
+                    m_firstJobTime = ProfileClockNow();
                     m_hasPushedJob = true;
                 }
             }
@@ -823,7 +835,7 @@ namespace jobsystem
         JobManagerDescriptor             m_desc;                         ///< Descriptor/configuration of the job manager.
 
         bool                            m_hasPushedJob;                 ///< For profiling - has a job been pushed yet?
-        ProfileClock::time_point        m_firstJobTime;                 ///< For profiling - when was the first job pushed?
+        TimePoint                       m_firstJobTime;                 ///< For profiling - when was the first job pushed?
         ProfilingTimeline*              m_timelines;                    ///< For profiling - a ProfilingTimeline entry for each worker, plus an additional entry to represent the Assist thread.
 
         std::vector<JobSystemWorker*>   m_workers;                      ///< Storage for worker instances.
@@ -834,36 +846,28 @@ namespace jobsystem
 
             AssistUntilDone();
 
-            auto now = ProfileClock::now();
+            auto now = ProfileClockNow();
             auto totalNS = std::chrono::duration_cast<std::chrono::nanoseconds>(now - m_firstJobTime).count();
 
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
             const size_t workerCount = m_workers.size();
 
-            char status[512];
-            sprintf_s(status,
+            printf(
                 "\n[Job System Statistics]\n"
                 "Jobs Run:       %8d\n" // May be < jobs submitted
                 "Jobs Stolen:    %8d\n"
                 "Jobs Assisted:  %8d\n"
-                "Workers Used:   %8llu\n"
-                "Workers Awoken: %8llu\n"
+                "Workers Used:   %8lu\n"
+                "Workers Awoken: %8lu\n"
                 ,
                 m_jobsRun.load(std::memory_order_acquire),
                 m_jobsStolen.load(std::memory_order_acquire),
                 m_jobsAssisted.load(std::memory_order_acquire),
-                m_usedMask.load(std::memory_order_acquire),
-                m_awokenMask.load(std::memory_order_acquire));
+                CountBits(m_usedMask.load(std::memory_order_acquire)),
+                CountBits(m_awokenMask.load(std::memory_order_acquire)));
 
-            printf(status);
-            OutputDebugStringA(status);
-
-            {
-                char buffer[128];
-                sprintf_s(buffer, "\n[Worker Profiling Results]\n%.3f total ms, %.3f ms per tick\n\n", float(totalNS) / 1000.f / 1000.f, float(totalNS) / 1000.f / 1000.f / 199.f);
-                OutputDebugStringA(buffer);
-            }
+            printf("\n[Worker Profiling Results]\n%.3f total ms, %.3f ms per tick\n\n", float(totalNS) / 1000.f / 1000.f, float(totalNS) / 1000.f / 1000.f / 199.f);
 
             const char* busySymbols = "abcdefghijklmn";
             const size_t busySymbolCount = strlen(busySymbols);
@@ -876,7 +880,7 @@ namespace jobsystem
 
                 const size_t bufferSize = 200;
                 char buffer[bufferSize];
-                sprintf_s(buffer, "%20s: ", name);
+                snprintf(buffer, sizeof(buffer), "%20s: ", name);
 
                 const size_t nameLen = strlen(buffer);
                 const size_t remaining = bufferSize - nameLen - 2;
@@ -918,10 +922,10 @@ namespace jobsystem
                     }
                 }
 
-                OutputDebugStringA(buffer);
+                printf("%s", buffer);
             }
 
-            OutputDebugStringA("\n");
+            printf("\n");
 
 #endif // JOBSYSTEM_ENABLE_PROFILING
         }
