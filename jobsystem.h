@@ -867,7 +867,7 @@ namespace jobsystem
                 CountBits(m_usedMask.load(std::memory_order_acquire)),
                 CountBits(m_awokenMask.load(std::memory_order_acquire)));
 
-            printf("\n[Worker Profiling Results]\n%.3f total ms, %.3f ms per tick\n\n", float(totalNS) / 1000.f / 1000.f, float(totalNS) / 1000.f / 1000.f / 199.f);
+            printf("\n[Worker Profiling Results]\n%.3f total ms\n\nTimeline (approximated):\n\n", double(totalNS) / 1000000);
 
             const char* busySymbols = "abcdefghijklmn";
             const size_t busySymbolCount = strlen(busySymbols);
@@ -895,16 +895,16 @@ namespace jobsystem
 
                 for (ProfilingTimeline::TimelineEntry& entry : timeline.m_entries)
                 {
-                    auto startNs = std::chrono::duration_cast<std::chrono::nanoseconds>(entry.start - m_firstJobTime).count();
-                    auto endNs = std::chrono::duration_cast<std::chrono::nanoseconds>(entry.end - m_firstJobTime).count();
+                    const auto startNs = std::chrono::duration_cast<std::chrono::nanoseconds>(entry.start - m_firstJobTime).count();
+                    const auto endNs = std::chrono::duration_cast<std::chrono::nanoseconds>(entry.end - m_firstJobTime).count();
 
-                    const float startPercent = (float(startNs) / float(totalNS));
-                    const float endPercent = (float(endNs) / float(totalNS));
+                    const double startPercent = (double(startNs) / double(totalNS));
+                    const double endPercent = (double(endNs) / double(totalNS));
 
-                    char jobCharacter = (entry.debugChar != 0) ? entry.debugChar : busySymbols[entry.jobId % busySymbolCount];
+                    const char jobCharacter = (entry.debugChar != 0) ? entry.debugChar : busySymbols[entry.jobId % busySymbolCount];
 
-                    size_t startIndex = nameLen + std::min<size_t>(remaining - 1, size_t(startPercent * float(remaining)));
-                    size_t endIndex = nameLen + std::min<size_t>(remaining - 1, size_t(endPercent * float(remaining)));
+                    const size_t startIndex = nameLen + std::min<size_t>(remaining - 1, size_t(startPercent * double(remaining)));
+                    size_t endIndex = nameLen + std::min<size_t>(remaining - 1, size_t(endPercent * double(remaining)));
 
                     size_t shift = 0;
 
@@ -913,7 +913,7 @@ namespace jobsystem
                         ++shift;
                     }
 
-                    endIndex -= std::min(endIndex - startIndex, shift);
+                    endIndex -= std::min<size_t>(endIndex - startIndex, size_t(shift));
 
                     for (size_t i = startIndex + shift; i <= endIndex + shift; ++i)
                     {
