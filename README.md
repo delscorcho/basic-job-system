@@ -2,7 +2,7 @@
 
 Implements a typical job system with features I've found useful in practice (Games, mostly).
 
-Currently only tested on Windows, but can trivially port to Linux/Console/etc. Only debug functionality (e.g. thread names) actually relies on Windows at the moment.
+Tested on Windows 10 and Ubuntu 18.
 
 Features include:
 - Simple interfaces for submitting, monitoring, and canceling jobs.

@@ -17,7 +17,7 @@ int main()
 {
     jobsystem::JobManagerDescriptor jobManagerDesc;
     
-    const size_t kWorkerCount = 64;
+    const size_t kWorkerCount = 16;
     for (size_t i = 0; i < kWorkerCount; ++i)
     {
         jobManagerDesc.m_workers.emplace_back("Worker");
