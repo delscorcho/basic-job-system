@@ -13,14 +13,12 @@
 int main()
 {
     jobsystem::JobManagerDescriptor jobManagerDesc;
-    jobManagerDesc.m_workers.emplace_back("Worker1");
-    jobManagerDesc.m_workers.emplace_back("Worker2");
-    jobManagerDesc.m_workers.emplace_back("Worker3");
-    jobManagerDesc.m_workers.emplace_back("Worker4");
-    jobManagerDesc.m_workers.emplace_back("Worker5");
-    jobManagerDesc.m_workers.emplace_back("Worker6");
-    jobManagerDesc.m_workers.emplace_back("Worker7");
-    jobManagerDesc.m_workers.emplace_back("Worker8");
+    
+    const size_t kWorkerCount = 8;
+    for (size_t i = 0; i < kWorkerCount; ++i)
+    {
+        jobManagerDesc.m_workers.emplace_back("Worker");
+    }
 
     jobsystem::JobManager jobManager;
     if (!jobManager.Create(jobManagerDesc))
